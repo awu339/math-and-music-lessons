@@ -1,5 +1,5 @@
 "use client";
-
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -33,18 +33,25 @@ export default function TeacherPage() {
 
   return (
     <main className="p-8 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Teacher Dashboard</h1>
-        <button
-          className="underline"
-          onClick={async () => {
-            await supabase.auth.signOut();
-            router.push("/login");
-          }}
-        >
-          Sign out
-        </button>
-      </div>
+
+        <div className="flex items-center gap-4">
+            <Link className="underline" href="/teacher/students">
+            Students
+            </Link>
+
+            <button
+            className="underline"
+            onClick={async () => {
+                await supabase.auth.signOut();
+                router.push("/login");
+            }}
+            >
+            Sign out
+            </button>
+        </div>
+        </div>
 
       <div className="mt-6 space-y-3">
         {lessons.map((l) => (

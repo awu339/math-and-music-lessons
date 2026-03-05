@@ -1,4 +1,5 @@
 "use client";
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -6,59 +7,93 @@ import { useRouter } from "next/navigation";
 
 type LessonRow = {
   id: string;
+  student_id: string;
   subject: string;
   starts_at: string;
   duration_minutes: number;
   notes: string;
 };
 
+type StudentMapRow = {
+  id: string;
+  full_name: string;
+};
+
 export default function TeacherPage() {
   const router = useRouter();
   const [lessons, setLessons] = useState<LessonRow[]>([]);
+  const [studentNames, setStudentNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     async function load() {
       const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) return router.push("/login");
+      const user = sessionData.session?.user;
+      if (!user) {
+        router.push("/login");
+        return;
+      }
 
-      const { data } = await supabase
+      const { data: lessonData } = await supabase
         .from("lessons")
-        .select("id, subject, starts_at, duration_minutes, notes")
+        .select("id, student_id, subject, starts_at, duration_minutes, notes")
+        .eq("teacher_id", user.id)
         .order("starts_at", { ascending: true });
 
-      setLessons((data as LessonRow[]) ?? []);
+      const lessonRows = (lessonData as LessonRow[]) ?? [];
+      setLessons(lessonRows);
+
+      const studentIds = Array.from(new Set(lessonRows.map((l) => l.student_id)));
+      if (studentIds.length === 0) {
+        setStudentNames({});
+        return;
+      }
+
+      const { data: studentRows } = await supabase
+        .from("students")
+        .select("id, full_name")
+        .in("id", studentIds);
+
+      const map: Record<string, string> = {};
+      ((studentRows as StudentMapRow[]) ?? []).forEach((s) => {
+        map[s.id] = s.full_name;
+      });
+      setStudentNames(map);
     }
+
     load();
   }, [router]);
 
   return (
     <main className="p-8 max-w-3xl mx-auto">
-        <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Teacher Dashboard</h1>
 
         <div className="flex items-center gap-4">
-            <Link className="underline" href="/teacher/students">
+          <Link className="underline" href="/teacher/students">
             Students
-            </Link>
+          </Link>
 
-            <button
+          <button
             className="underline"
             onClick={async () => {
-                await supabase.auth.signOut();
-                router.push("/login");
+              await supabase.auth.signOut();
+              router.push("/login");
             }}
-            >
+          >
             Sign out
-            </button>
+          </button>
         </div>
-        </div>
+      </div>
 
       <div className="mt-6 space-y-3">
         {lessons.map((l) => (
           <div key={l.id} className="border rounded p-4">
             <div className="font-medium">{l.subject}</div>
             <div className="text-sm text-gray-600">
-              {new Date(l.starts_at).toLocaleString()} • {l.duration_minutes} min
+              {new Date(l.starts_at).toLocaleString()} - {l.duration_minutes} min
+            </div>
+            <div className="text-sm text-gray-600">
+              Student: {studentNames[l.student_id] ?? "Unknown student"}
             </div>
             <div className="mt-2 text-sm">
               <span className="font-medium">Notes:</span>{" "}

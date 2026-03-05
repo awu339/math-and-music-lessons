@@ -22,8 +22,10 @@ type ChecklistRow = {
 
 export default function TeacherStudentDetailPage() {
   const router = useRouter();
-  const params = useParams();
-  const studentId = params.studentId as string;
+  const params = useParams<{ studentID?: string | string[] }>();
+  const studentId = Array.isArray(params.studentID)
+    ? params.studentID[0]
+    : params.studentID;
 
   const [studentName, setStudentName] = useState<string>("");
   const [lessons, setLessons] = useState<LessonRow[]>([]);
@@ -32,7 +34,8 @@ export default function TeacherStudentDetailPage() {
 
   // Create lesson form
   const [subject, setSubject] = useState("Piano");
-  const [startsAt, setStartsAt] = useState("");
+  const [lessonDate, setLessonDate] = useState("");
+  const [lessonTime, setLessonTime] = useState("16:00");
   const [duration, setDuration] = useState(60);
 
   // Notes editing
@@ -43,11 +46,12 @@ export default function TeacherStudentDetailPage() {
   const [assignmentText, setAssignmentText] = useState("");
   const [assignmentLessonId, setAssignmentLessonId] = useState<string>("");
 
-  const lessonMap = useMemo(() => {
-    const m: Record<string, LessonRow> = {};
-    lessons.forEach((l) => (m[l.id] = l));
-    return m;
-  }, [lessons]);
+  function isValidUuid(value?: string) {
+    if (!value) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    );
+  }
 
   async function requireAuth() {
     const { data } = await supabase.auth.getSession();
@@ -60,10 +64,14 @@ export default function TeacherStudentDetailPage() {
 
   async function loadAll() {
     setMsg(null);
+    if (!isValidUuid(studentId)) {
+      setMsg("Invalid student id.");
+      return;
+    }
+
     const user = await requireAuth();
     if (!user) return;
 
-    // Student name
     const { data: student, error: sErr } = await supabase
       .from("students")
       .select("full_name")
@@ -73,7 +81,6 @@ export default function TeacherStudentDetailPage() {
     if (sErr) return setMsg(sErr.message);
     setStudentName(student?.full_name ?? "");
 
-    // Lessons for this student
     const { data: lessonData, error: lErr } = await supabase
       .from("lessons")
       .select("id, subject, starts_at, duration_minutes, notes")
@@ -81,9 +88,13 @@ export default function TeacherStudentDetailPage() {
       .order("starts_at", { ascending: true });
 
     if (lErr) return setMsg(lErr.message);
-    setLessons((lessonData as LessonRow[]) ?? []);
+    const loadedLessons = (lessonData as LessonRow[]) ?? [];
+    setLessons(loadedLessons);
 
-    // Checklist items for all lessons (teacher RLS allows)
+    if (!assignmentLessonId && loadedLessons.length > 0) {
+      setAssignmentLessonId(loadedLessons[0].id);
+    }
+
     const { data: cData, error: cErr } = await supabase
       .from("checklist_items")
       .select("id, lesson_id, text, sort_order")
@@ -97,27 +108,37 @@ export default function TeacherStudentDetailPage() {
     e.preventDefault();
     setMsg(null);
 
+    if (!isValidUuid(studentId)) {
+      return setMsg("Invalid student id.");
+    }
+
     const user = await requireAuth();
     if (!user) return;
 
-    if (!startsAt) return setMsg("Choose a start date/time.");
+    if (!lessonDate) return setMsg("Choose a lesson date.");
+
+    const localDateTime = new Date(`${lessonDate}T${lessonTime || "00:00"}:00`);
+    if (Number.isNaN(localDateTime.getTime())) {
+      return setMsg("Invalid date/time.");
+    }
 
     const { error } = await supabase.from("lessons").insert({
       teacher_id: user.id,
       student_id: studentId,
       subject: subject.trim() || "Lesson",
-      starts_at: new Date(startsAt).toISOString(),
+      starts_at: localDateTime.toISOString(),
       duration_minutes: duration,
       notes: "",
     });
 
     if (error) return setMsg(error.message);
 
-    setStartsAt("");
+    setLessonDate("");
+    setLessonTime("16:00");
     await loadAll();
   }
 
-  async function startEditNotes(lesson: LessonRow) {
+  function startEditNotes(lesson: LessonRow) {
     setEditingNotesId(lesson.id);
     setNotesDraft(lesson.notes ?? "");
   }
@@ -146,10 +167,12 @@ export default function TeacherStudentDetailPage() {
     if (!text) return setMsg("Assignment text is required.");
     if (!assignmentLessonId) return setMsg("Pick a lesson to attach this to.");
 
+    const nextSortOrder = checklist.filter((c) => c.lesson_id === assignmentLessonId).length;
+
     const { error } = await supabase.from("checklist_items").insert({
       lesson_id: assignmentLessonId,
       text,
-      sort_order: 0,
+      sort_order: nextSortOrder,
     });
 
     if (error) return setMsg(error.message);
@@ -163,18 +186,16 @@ export default function TeacherStudentDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentId]);
 
-  const lessonsForDropdown = lessons.slice().sort((a, b) =>
-    a.starts_at.localeCompare(b.starts_at)
-  );
+  const lessonsForDropdown = useMemo(() => {
+    return lessons.slice().sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  }, [lessons]);
 
   return (
     <main className="p-8 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">
-            Manage: {studentName || "Student"}
-          </h1>
-          <div className="text-sm text-gray-600">Create lessons, notes, and assignments.</div>
+          <h1 className="text-xl font-semibold">Manage: {studentName || "Student"}</h1>
+          <div className="text-sm text-gray-600">Create lessons, add notes, and assign checklist work.</div>
         </div>
         <Link className="underline" href="/teacher/students">
           Back to Students
@@ -183,9 +204,8 @@ export default function TeacherStudentDetailPage() {
 
       {msg && <p className="mt-4 text-sm text-red-600">{msg}</p>}
 
-      {/* Create Lesson */}
       <section className="mt-6 border rounded p-4">
-        <h2 className="font-medium">Create a lesson</h2>
+        <h2 className="font-medium">Schedule a lesson</h2>
         <form onSubmit={createLesson} className="mt-3 grid gap-2">
           <label className="text-sm">
             Subject
@@ -198,12 +218,22 @@ export default function TeacherStudentDetailPage() {
           </label>
 
           <label className="text-sm">
-            Start date/time (local)
+            Lesson date
             <input
               className="w-full border rounded p-2 mt-1"
-              type="datetime-local"
-              value={startsAt}
-              onChange={(e) => setStartsAt(e.target.value)}
+              type="date"
+              value={lessonDate}
+              onChange={(e) => setLessonDate(e.target.value)}
+            />
+          </label>
+
+          <label className="text-sm">
+            Lesson time
+            <input
+              className="w-full border rounded p-2 mt-1"
+              type="time"
+              value={lessonTime}
+              onChange={(e) => setLessonTime(e.target.value)}
             />
           </label>
 
@@ -219,15 +249,12 @@ export default function TeacherStudentDetailPage() {
             />
           </label>
 
-          <button className="rounded bg-black text-white py-2 mt-1">
-            Create Lesson
-          </button>
+          <button className="rounded bg-black text-white py-2 mt-1">Schedule Lesson</button>
         </form>
       </section>
 
-      {/* Add Assignment */}
       <section className="mt-6 border rounded p-4">
-        <h2 className="font-medium">Add assignment (checklist item)</h2>
+        <h2 className="font-medium">Add checklist item</h2>
         <form onSubmit={addAssignment} className="mt-3 grid gap-2">
           <label className="text-sm">
             Attach to lesson
@@ -236,10 +263,10 @@ export default function TeacherStudentDetailPage() {
               value={assignmentLessonId}
               onChange={(e) => setAssignmentLessonId(e.target.value)}
             >
-              <option value="">Select a lesson…</option>
+              <option value="">Select a lesson...</option>
               {lessonsForDropdown.map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.subject} — {new Date(l.starts_at).toLocaleString()}
+                  {l.subject} - {new Date(l.starts_at).toLocaleString()}
                 </option>
               ))}
             </select>
@@ -255,13 +282,10 @@ export default function TeacherStudentDetailPage() {
             />
           </label>
 
-          <button className="rounded bg-black text-white py-2 mt-1">
-            Add Assignment
-          </button>
+          <button className="rounded bg-black text-white py-2 mt-1">Add Assignment</button>
         </form>
       </section>
 
-      {/* Lessons list + notes editor */}
       <section className="mt-6">
         <h2 className="font-medium">Lessons</h2>
 
@@ -272,19 +296,15 @@ export default function TeacherStudentDetailPage() {
                 <div>
                   <div className="font-medium">{l.subject}</div>
                   <div className="text-sm text-gray-600">
-                    {new Date(l.starts_at).toLocaleString()} • {l.duration_minutes} min
+                    {new Date(l.starts_at).toLocaleString()} - {l.duration_minutes} min
                   </div>
                 </div>
 
-                <button
-                  className="underline text-sm"
-                  onClick={() => startEditNotes(l)}
-                >
+                <button className="underline text-sm" onClick={() => startEditNotes(l)}>
                   Edit notes
                 </button>
               </div>
 
-              {/* Notes */}
               {editingNotesId === l.id ? (
                 <div className="mt-3">
                   <textarea
@@ -321,7 +341,6 @@ export default function TeacherStudentDetailPage() {
                 </div>
               )}
 
-              {/* Assignments for this lesson */}
               <div className="mt-3">
                 <div className="text-sm font-medium">Assignments</div>
                 <div className="mt-2 space-y-1 text-sm">
@@ -329,7 +348,7 @@ export default function TeacherStudentDetailPage() {
                     .filter((c) => c.lesson_id === l.id)
                     .map((c) => (
                       <div key={c.id} className="flex items-center gap-2">
-                        <span>•</span>
+                        <span>*</span>
                         <span>{c.text}</span>
                       </div>
                     ))}
@@ -341,9 +360,7 @@ export default function TeacherStudentDetailPage() {
             </div>
           ))}
 
-          {lessons.length === 0 && (
-            <div className="text-sm text-gray-500">No lessons yet.</div>
-          )}
+          {lessons.length === 0 && <div className="text-sm text-gray-500">No lessons yet.</div>}
         </div>
       </section>
     </main>

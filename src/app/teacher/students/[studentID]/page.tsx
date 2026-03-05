@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 type LessonRow = {
@@ -20,29 +20,35 @@ type ChecklistRow = {
   sort_order: number;
 };
 
+type CompletionRow = {
+  checklist_item_id: string;
+  completed: boolean;
+};
+
 export default function TeacherStudentDetailPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ studentID?: string | string[] }>();
   const studentId = Array.isArray(params.studentID)
     ? params.studentID[0]
     : params.studentID;
 
+  const highlightedLessonId = searchParams.get("lessonId") ?? "";
+
   const [studentName, setStudentName] = useState<string>("");
   const [lessons, setLessons] = useState<LessonRow[]>([]);
   const [checklist, setChecklist] = useState<ChecklistRow[]>([]);
+  const [completedItemIds, setCompletedItemIds] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Create lesson form
   const [subject, setSubject] = useState("Piano");
   const [lessonDate, setLessonDate] = useState("");
   const [lessonTime, setLessonTime] = useState("16:00");
   const [duration, setDuration] = useState(60);
 
-  // Notes editing
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
 
-  // Add assignment
   const [assignmentText, setAssignmentText] = useState("");
   const [assignmentLessonId, setAssignmentLessonId] = useState<string>("");
 
@@ -74,12 +80,14 @@ export default function TeacherStudentDetailPage() {
 
     const { data: student, error: sErr } = await supabase
       .from("students")
-      .select("full_name")
+      .select("full_name, student_user_id")
       .eq("id", studentId)
       .single();
 
     if (sErr) return setMsg(sErr.message);
     setStudentName(student?.full_name ?? "");
+
+    const selectedStudentUserId = student?.student_user_id as string | undefined;
 
     const { data: lessonData, error: lErr } = await supabase
       .from("lessons")
@@ -101,7 +109,28 @@ export default function TeacherStudentDetailPage() {
       .order("sort_order", { ascending: true });
 
     if (cErr) return setMsg(cErr.message);
-    setChecklist((cData as ChecklistRow[]) ?? []);
+    const loadedChecklist = (cData as ChecklistRow[]) ?? [];
+    setChecklist(loadedChecklist);
+
+    const checklistIds = loadedChecklist.map((c) => c.id);
+    if (!selectedStudentUserId || checklistIds.length === 0) {
+      setCompletedItemIds(new Set());
+      return;
+    }
+
+    const { data: completionData, error: completionErr } = await supabase
+      .from("checklist_completions")
+      .select("checklist_item_id, completed")
+      .eq("student_user_id", selectedStudentUserId)
+      .in("checklist_item_id", checklistIds);
+
+    if (completionErr) return setMsg(completionErr.message);
+
+    const completed = new Set<string>();
+    ((completionData as CompletionRow[]) ?? []).forEach((row) => {
+      if (row.completed) completed.add(row.checklist_item_id);
+    });
+    setCompletedItemIds(completed);
   }
 
   async function createLesson(e: React.FormEvent) {
@@ -290,75 +319,87 @@ export default function TeacherStudentDetailPage() {
         <h2 className="font-medium">Lessons</h2>
 
         <div className="mt-3 space-y-3">
-          {lessons.map((l) => (
-            <div key={l.id} className="border rounded p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="font-medium">{l.subject}</div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(l.starts_at).toLocaleString()} - {l.duration_minutes} min
+          {lessons.map((l) => {
+            const lessonItems = checklist.filter((c) => c.lesson_id === l.id);
+            const isHighlighted = highlightedLessonId === l.id;
+
+            return (
+              <div
+                key={l.id}
+                className={`border rounded p-4 ${isHighlighted ? "border-black ring-1 ring-black" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-medium">{l.subject}</div>
+                    <div className="text-sm text-gray-600">
+                      {new Date(l.starts_at).toLocaleString()} - {l.duration_minutes} min
+                    </div>
                   </div>
+
+                  <button className="underline text-sm" onClick={() => startEditNotes(l)}>
+                    Edit notes
+                  </button>
                 </div>
 
-                <button className="underline text-sm" onClick={() => startEditNotes(l)}>
-                  Edit notes
-                </button>
-              </div>
+                {editingNotesId === l.id ? (
+                  <div className="mt-3">
+                    <textarea
+                      className="w-full border rounded p-2 text-sm"
+                      rows={5}
+                      value={notesDraft}
+                      onChange={(e) => setNotesDraft(e.target.value)}
+                      placeholder="Lesson notes..."
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        className="rounded bg-black text-white px-4 py-2 text-sm"
+                        onClick={saveNotes}
+                        type="button"
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="rounded border px-4 py-2 text-sm"
+                        type="button"
+                        onClick={() => {
+                          setEditingNotesId(null);
+                          setNotesDraft("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 text-sm">
+                    <span className="font-medium">Notes:</span>{" "}
+                    {l.notes || <span className="text-gray-500">No notes yet.</span>}
+                  </div>
+                )}
 
-              {editingNotesId === l.id ? (
                 <div className="mt-3">
-                  <textarea
-                    className="w-full border rounded p-2 text-sm"
-                    rows={5}
-                    value={notesDraft}
-                    onChange={(e) => setNotesDraft(e.target.value)}
-                    placeholder="Lesson notes..."
-                  />
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      className="rounded bg-black text-white px-4 py-2 text-sm"
-                      onClick={saveNotes}
-                      type="button"
-                    >
-                      Save
-                    </button>
-                    <button
-                      className="rounded border px-4 py-2 text-sm"
-                      type="button"
-                      onClick={() => {
-                        setEditingNotesId(null);
-                        setNotesDraft("");
-                      }}
-                    >
-                      Cancel
-                    </button>
+                  <div className="text-sm font-medium">Assignments</div>
+                  <div className="mt-2 space-y-1 text-sm">
+                    {lessonItems.map((c) => {
+                      const isComplete = completedItemIds.has(c.id);
+                      return (
+                        <div key={c.id} className="flex items-center gap-2">
+                          <span>*</span>
+                          <span className={isComplete ? "line-through text-gray-500" : ""}>
+                            {c.text}
+                          </span>
+                          {isComplete && <span className="text-xs text-gray-500">(Completed)</span>}
+                        </div>
+                      );
+                    })}
+                    {lessonItems.length === 0 && (
+                      <div className="text-gray-500">No assignments yet.</div>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <div className="mt-3 text-sm">
-                  <span className="font-medium">Notes:</span>{" "}
-                  {l.notes || <span className="text-gray-500">No notes yet.</span>}
-                </div>
-              )}
-
-              <div className="mt-3">
-                <div className="text-sm font-medium">Assignments</div>
-                <div className="mt-2 space-y-1 text-sm">
-                  {checklist
-                    .filter((c) => c.lesson_id === l.id)
-                    .map((c) => (
-                      <div key={c.id} className="flex items-center gap-2">
-                        <span>*</span>
-                        <span>{c.text}</span>
-                      </div>
-                    ))}
-                  {checklist.filter((c) => c.lesson_id === l.id).length === 0 && (
-                    <div className="text-gray-500">No assignments yet.</div>
-                  )}
-                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {lessons.length === 0 && <div className="text-sm text-gray-500">No lessons yet.</div>}
         </div>

@@ -107,6 +107,10 @@ export default function TeacherStudentsPage() {
     return new Set(myStudents.map((s) => s.student_user_id));
   }, [myStudents]);
 
+  const availableStudents = useMemo(() => {
+    return allStudents.filter((s) => !myStudentUserIds.has(s.id));
+  }, [allStudents, myStudentUserIds]);
+
   return (
     <main className="p-8 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
@@ -147,29 +151,26 @@ export default function TeacherStudentsPage() {
         </p>
 
         <div className="mt-3 space-y-2">
-          {allStudents.map((s) => {
-            const alreadyAdded = myStudentUserIds.has(s.id);
-            return (
-              <div key={s.id} className="border rounded p-3 flex justify-between items-center gap-3">
-                <div>
-                  <div className="font-medium">{s.full_name || "Student"}</div>
-                  <div className="text-xs text-gray-500">
-                    Joined {new Date(s.created_at).toLocaleString()}
-                  </div>
+          {availableStudents.map((s) => (
+            <div key={s.id} className="border rounded p-3 flex justify-between items-center gap-3">
+              <div>
+                <div className="font-medium">{s.full_name || "Student"}</div>
+                <div className="text-xs text-gray-500">
+                  Joined {new Date(s.created_at).toLocaleString()}
                 </div>
-                <button
-                  type="button"
-                  className="rounded border px-3 py-1 text-sm disabled:opacity-60"
-                  disabled={alreadyAdded || busyUserId === s.id}
-                  onClick={() => addToMyStudents(s.id)}
-                >
-                  {alreadyAdded ? "Added" : busyUserId === s.id ? "Adding..." : "Add to My Students"}
-                </button>
               </div>
-            );
-          })}
-          {allStudents.length === 0 && (
-            <div className="text-sm text-gray-500">No student accounts yet.</div>
+              <button
+                type="button"
+                className="rounded border px-3 py-1 text-sm disabled:opacity-60"
+                disabled={busyUserId === s.id}
+                onClick={() => addToMyStudents(s.id)}
+              >
+                {busyUserId === s.id ? "Adding..." : "Add to My Students"}
+              </button>
+            </div>
+          ))}
+          {availableStudents.length === 0 && (
+            <div className="text-sm text-gray-500">No unclaimed student accounts right now.</div>
           )}
         </div>
       </section>

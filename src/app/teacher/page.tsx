@@ -87,7 +87,11 @@ export default function TeacherPage() {
 
       <div className="mt-6 space-y-3">
         {lessons.map((l) => (
-          <div key={l.id} className="border rounded p-4">
+          <Link
+            key={l.id}
+            href={`/teacher/students/${l.student_id}?lessonId=${l.id}`}
+            className="block border rounded p-4 hover:bg-gray-50"
+          >
             <div className="font-medium">{l.subject}</div>
             <div className="text-sm text-gray-600">
               {new Date(l.starts_at).toLocaleString()} - {l.duration_minutes} min
@@ -99,7 +103,8 @@ export default function TeacherPage() {
               <span className="font-medium">Notes:</span>{" "}
               {l.notes || "No notes yet."}
             </div>
-          </div>
+            <div className="mt-2 text-sm underline">Open lesson details</div>
+          </Link>
         ))}
         {lessons.length === 0 && (
           <div className="text-sm text-gray-500">No lessons yet.</div>

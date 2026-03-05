@@ -93,7 +93,12 @@ export default function TeacherStudentsPage() {
     });
 
     setBusyUserId(null);
-    if (error) return setMsg(error.message);
+    if (error) {
+      if (error.code === '23505') {
+        return setMsg('That student is already in your students list.');
+      }
+      return setMsg(error.message);
+    }
 
     await loadStudents();
   }

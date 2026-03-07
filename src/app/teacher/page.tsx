@@ -1,9 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
+import interactionPlugin from "@fullcalendar/interaction";
+import type { EventClickArg } from "@fullcalendar/core";
 
 type LessonRow = {
   id: string;
@@ -11,7 +16,6 @@ type LessonRow = {
   subject: string;
   starts_at: string;
   duration_minutes: number;
-  notes: string;
 };
 
 type StudentMapRow = {
@@ -23,9 +27,12 @@ export default function TeacherPage() {
   const router = useRouter();
   const [lessons, setLessons] = useState<LessonRow[]>([]);
   const [studentNames, setStudentNames] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
+      setMsg(null);
+
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData.session?.user;
       if (!user) {
@@ -33,11 +40,16 @@ export default function TeacherPage() {
         return;
       }
 
-      const { data: lessonData } = await supabase
+      const { data: lessonData, error: lessonErr } = await supabase
         .from("lessons")
-        .select("id, student_id, subject, starts_at, duration_minutes, notes")
+        .select("id, student_id, subject, starts_at, duration_minutes")
         .eq("teacher_id", user.id)
         .order("starts_at", { ascending: true });
+
+      if (lessonErr) {
+        setMsg(lessonErr.message);
+        return;
+      }
 
       const lessonRows = (lessonData as LessonRow[]) ?? [];
       setLessons(lessonRows);
@@ -48,10 +60,15 @@ export default function TeacherPage() {
         return;
       }
 
-      const { data: studentRows } = await supabase
+      const { data: studentRows, error: studentErr } = await supabase
         .from("students")
         .select("id, full_name")
         .in("id", studentIds);
+
+      if (studentErr) {
+        setMsg(studentErr.message);
+        return;
+      }
 
       const map: Record<string, string> = {};
       ((studentRows as StudentMapRow[]) ?? []).forEach((s) => {
@@ -63,16 +80,36 @@ export default function TeacherPage() {
     load();
   }, [router]);
 
+  const events = useMemo(() => {
+    return lessons.map((lesson) => ({
+      id: lesson.id,
+      title: `${lesson.subject} - ${studentNames[lesson.student_id] ?? "Student"}`,
+      start: lesson.starts_at,
+      end: new Date(
+        new Date(lesson.starts_at).getTime() + lesson.duration_minutes * 60_000
+      ).toISOString(),
+      extendedProps: {
+        studentId: lesson.student_id,
+      },
+    }));
+  }, [lessons, studentNames]);
+
+  function onEventClick(arg: EventClickArg) {
+    const studentId = String(arg.event.extendedProps.studentId ?? "");
+    const lessonId = arg.event.id;
+    if (!studentId || !lessonId) return;
+    router.push(`/teacher/students/${studentId}?lessonId=${lessonId}`);
+  }
+
   return (
-    <main className="p-8 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Teacher Dashboard</h1>
+    <main className="p-6 max-w-6xl mx-auto">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h1 className="text-2xl font-semibold">Teacher Calendar</h1>
 
         <div className="flex items-center gap-4">
           <Link className="underline" href="/teacher/students">
             Students
           </Link>
-
           <button
             className="underline"
             onClick={async () => {
@@ -85,30 +122,22 @@ export default function TeacherPage() {
         </div>
       </div>
 
-      <div className="mt-6 space-y-3">
-        {lessons.map((l) => (
-          <Link
-            key={l.id}
-            href={`/teacher/students/${l.student_id}?lessonId=${l.id}`}
-            className="block border rounded p-4 hover:bg-gray-50"
-          >
-            <div className="font-medium">{l.subject}</div>
-            <div className="text-sm text-gray-600">
-              {new Date(l.starts_at).toLocaleString()} - {l.duration_minutes} min
-            </div>
-            <div className="text-sm text-gray-600">
-              Student: {studentNames[l.student_id] ?? "Unknown student"}
-            </div>
-            <div className="mt-2 text-sm">
-              <span className="font-medium">Notes:</span>{" "}
-              {l.notes || "No notes yet."}
-            </div>
-            <div className="mt-2 text-sm underline">Open lesson details</div>
-          </Link>
-        ))}
-        {lessons.length === 0 && (
-          <div className="text-sm text-gray-500">No lessons yet.</div>
-        )}
+      {msg && <p className="mt-3 text-sm text-red-600">{msg}</p>}
+
+      <div className="mt-6 border rounded p-3 bg-white">
+        <FullCalendar
+          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          headerToolbar={{
+            left: "prev,next today",
+            center: "title",
+            right: "dayGridMonth,timeGridWeek,timeGridDay",
+          }}
+          events={events}
+          eventClick={onEventClick}
+          dayMaxEvents={3}
+          height="auto"
+        />
       </div>
     </main>
   );

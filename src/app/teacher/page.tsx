@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import FullCalendar from "@fullcalendar/react";
@@ -23,13 +23,9 @@ type StudentMapRow = {
   full_name: string;
 };
 
-function addMinutes(isoLike: string, minutes: number) {
-  const d = new Date(isoLike);
-  return new Date(d.getTime() + minutes * 60_000).toISOString();
-}
-
 export default function TeacherPage() {
   const router = useRouter();
+  const calendarRef = useRef<FullCalendar | null>(null);
   const [lessons, setLessons] = useState<LessonRow[]>([]);
   const [studentNames, setStudentNames] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
@@ -104,14 +100,25 @@ export default function TeacherPage() {
   }
 
   function onDateClick(arg: DateClickArg) {
-    const start = arg.date.toISOString();
-    const end = addMinutes(start, 60);
-    router.push(
-      `/teacher/lessons/new?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
-    );
+    if (arg.view.type === "dayGridMonth") {
+      const api = calendarRef.current?.getApi();
+      api?.changeView("timeGridDay", arg.date);
+      api?.unselect();
+    }
   }
 
   function onSelect(arg: DateSelectArg) {
+    if (arg.view.type === "dayGridMonth") {
+      const api = calendarRef.current?.getApi();
+      api?.changeView("timeGridDay", arg.start);
+      api?.unselect();
+      return;
+    }
+
+    if (arg.view.type !== "timeGridDay" && arg.view.type !== "timeGridWeek") {
+      return;
+    }
+
     const start = arg.start.toISOString();
     const end = arg.end.toISOString();
     router.push(
@@ -141,13 +148,14 @@ export default function TeacherPage() {
       </div>
 
       <p className="mt-2 text-sm text-gray-600">
-        Click a day or drag a time range to create a lesson. Click an existing lesson to open it.
+        Month: click a day to open day view. Week/day: drag 15-minute blocks to create lessons with exact duration.
       </p>
 
       {msg && <p className="mt-3 text-sm text-red-600">{msg}</p>}
 
       <div className="mt-6 border rounded p-3 bg-white">
         <FullCalendar
+          ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView="dayGridMonth"
           headerToolbar={{
@@ -161,6 +169,9 @@ export default function TeacherPage() {
           dateClick={onDateClick}
           select={onSelect}
           eventClick={onEventClick}
+          slotDuration="00:15:00"
+          snapDuration="00:15:00"
+          slotLabelInterval="00:30:00"
           dayMaxEvents={3}
           height="auto"
         />

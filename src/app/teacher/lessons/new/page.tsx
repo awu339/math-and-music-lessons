@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 type StudentRow = {
   id: string;
@@ -21,7 +21,6 @@ function toLocalInputValue(date: Date) {
 
 export default function TeacherNewLessonPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [studentId, setStudentId] = useState("");
@@ -42,8 +41,9 @@ export default function TeacherNewLessonPage() {
         return;
       }
 
-      const startParam = searchParams.get("start");
-      const endParam = searchParams.get("end");
+      const query = new URLSearchParams(window.location.search);
+      const startParam = query.get("start");
+      const endParam = query.get("end");
       const startDate = startParam ? new Date(startParam) : new Date();
       const endDate = endParam
         ? new Date(endParam)
@@ -65,7 +65,7 @@ export default function TeacherNewLessonPage() {
     }
 
     load();
-  }, [router, searchParams]);
+  }, [router]);
 
   const durationMinutes = useMemo(() => {
     if (!startsAt || !endsAt) return 0;

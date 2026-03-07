@@ -45,6 +45,8 @@ export default function TeacherStudentDetailPage() {
   const [lessonDate, setLessonDate] = useState("");
   const [lessonTime, setLessonTime] = useState("16:00");
   const [duration, setDuration] = useState(60);
+  const [repeatWeekly, setRepeatWeekly] = useState(false);
+  const [repeatWeeks, setRepeatWeeks] = useState(4);
 
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
@@ -145,25 +147,35 @@ export default function TeacherStudentDetailPage() {
     if (!user) return;
 
     if (!lessonDate) return setMsg("Choose a lesson date.");
+    if (!duration || duration < 15) return setMsg("Duration must be at least 15 minutes.");
 
     const localDateTime = new Date(`${lessonDate}T${lessonTime || "00:00"}:00`);
     if (Number.isNaN(localDateTime.getTime())) {
       return setMsg("Invalid date/time.");
     }
 
-    const { error } = await supabase.from("lessons").insert({
-      teacher_id: user.id,
-      student_id: studentId,
-      subject: subject.trim() || "Lesson",
-      starts_at: localDateTime.toISOString(),
-      duration_minutes: duration,
-      notes: "",
+    const weekCount = repeatWeekly ? Math.max(1, repeatWeeks) : 1;
+
+    const rows = Array.from({ length: weekCount }, (_, i) => {
+      const startsAt = new Date(localDateTime.getTime() + i * 7 * 24 * 60 * 60 * 1000);
+      return {
+        teacher_id: user.id,
+        student_id: studentId,
+        subject: subject.trim() || "Lesson",
+        starts_at: startsAt.toISOString(),
+        duration_minutes: duration,
+        notes: "",
+      };
     });
+
+    const { error } = await supabase.from("lessons").insert(rows);
 
     if (error) return setMsg(error.message);
 
     setLessonDate("");
     setLessonTime("16:00");
+    setRepeatWeekly(false);
+    setRepeatWeeks(4);
     await loadAll();
   }
 
@@ -226,9 +238,14 @@ export default function TeacherStudentDetailPage() {
           <h1 className="text-xl font-semibold">Manage: {studentName || "Student"}</h1>
           <div className="text-sm text-gray-600">Create lessons, add notes, and assign checklist work.</div>
         </div>
-        <Link className="underline" href="/teacher/students">
-          Back to Students
-        </Link>
+        <div className="flex items-center gap-3 text-sm">
+          <Link className="underline" href="/teacher/lessons">
+            Lessons
+          </Link>
+          <Link className="underline" href="/teacher/students">
+            Back to Students
+          </Link>
+        </div>
       </div>
 
       {msg && <p className="mt-4 text-sm text-red-600">{msg}</p>}
@@ -277,6 +294,29 @@ export default function TeacherStudentDetailPage() {
               step={15}
             />
           </label>
+
+          <label className="text-sm flex items-center gap-2 mt-1">
+            <input
+              type="checkbox"
+              checked={repeatWeekly}
+              onChange={(e) => setRepeatWeekly(e.target.checked)}
+            />
+            Repeat weekly
+          </label>
+
+          {repeatWeekly && (
+            <label className="text-sm">
+              Number of weeks
+              <input
+                className="w-full border rounded p-2 mt-1"
+                type="number"
+                min={1}
+                max={52}
+                value={repeatWeeks}
+                onChange={(e) => setRepeatWeeks(parseInt(e.target.value || "1", 10))}
+              />
+            </label>
+          )}
 
           <button className="rounded bg-black text-white py-2 mt-1">Schedule Lesson</button>
         </form>

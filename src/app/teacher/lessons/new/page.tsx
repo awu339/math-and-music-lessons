@@ -121,9 +121,14 @@ export default function TeacherNewLessonPage() {
     <main className="p-8 max-w-xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Create Lesson</h1>
-        <Link className="underline" href="/teacher">
-          Back to Calendar
-        </Link>
+        <div className="flex items-center gap-3 text-sm">
+          <Link className="underline" href="/teacher/lessons">
+            Lessons
+          </Link>
+          <Link className="underline" href="/teacher">
+            Back to Calendar
+          </Link>
+        </div>
       </div>
 
       {msg && <p className="mt-4 text-sm text-red-600">{msg}</p>}

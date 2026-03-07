@@ -8,7 +8,7 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
+import type { DateSelectArg, EventClickArg, EventMountArg } from "@fullcalendar/core";
 import type { DateClickArg } from "@fullcalendar/interaction";
 
 type LessonRow = {
@@ -17,12 +17,22 @@ type LessonRow = {
   subject: string;
   starts_at: string;
   duration_minutes: number;
+  checked_in_at: string | null;
 };
 
 type StudentMapRow = {
   id: string;
   full_name: string;
 };
+
+function getLessonStatus(lesson: LessonRow) {
+  const endMs = new Date(lesson.starts_at).getTime() + lesson.duration_minutes * 60_000;
+  const isPast = endMs < Date.now();
+  const attended = Boolean(lesson.checked_in_at);
+
+  if (!isPast) return { isPast, color: "#2563eb" };
+  return { isPast, color: attended ? "#16a34a" : "#dc2626" };
+}
 
 export default function TeacherPage() {
   const router = useRouter();
@@ -44,7 +54,7 @@ export default function TeacherPage() {
 
       const { data: lessonData, error: lessonErr } = await supabase
         .from("lessons")
-        .select("id, student_id, subject, starts_at, duration_minutes")
+        .select("id, student_id, subject, starts_at, duration_minutes, checked_in_at")
         .eq("teacher_id", user.id)
         .order("starts_at", { ascending: true });
 
@@ -83,17 +93,23 @@ export default function TeacherPage() {
   }, [router]);
 
   const events = useMemo(() => {
-    return lessons.map((lesson) => ({
-      id: lesson.id,
-      title: `${lesson.subject} - ${studentNames[lesson.student_id] ?? "Student"}`,
-      start: lesson.starts_at,
-      end: new Date(
-        new Date(lesson.starts_at).getTime() + lesson.duration_minutes * 60_000
-      ).toISOString(),
-      extendedProps: {
-        studentId: lesson.student_id,
-      },
-    }));
+    return lessons.map((lesson) => {
+      const status = getLessonStatus(lesson);
+      return {
+        id: lesson.id,
+        title: `${lesson.subject} - ${studentNames[lesson.student_id] ?? "Student"}`,
+        start: lesson.starts_at,
+        end: new Date(
+          new Date(lesson.starts_at).getTime() + lesson.duration_minutes * 60_000
+        ).toISOString(),
+        backgroundColor: status.color,
+        borderColor: status.color,
+        textColor: "#ffffff",
+        extendedProps: {
+          isPast: status.isPast,
+        },
+      };
+    });
   }, [lessons, studentNames]);
 
   function onEventClick(arg: EventClickArg) {
@@ -127,12 +143,22 @@ export default function TeacherPage() {
     );
   }
 
+  function onEventDidMount(arg: EventMountArg) {
+    const isPast = Boolean(arg.event.extendedProps.isPast);
+    if (isPast) {
+      arg.el.style.textDecoration = "line-through";
+    }
+  }
+
   return (
     <main className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-2xl font-semibold">Teacher Calendar</h1>
 
         <div className="flex items-center gap-4">
+          <Link className="underline" href="/teacher/lessons">
+            Lessons
+          </Link>
           <Link className="underline" href="/teacher/students">
             Students
           </Link>
@@ -149,7 +175,7 @@ export default function TeacherPage() {
       </div>
 
       <p className="mt-2 text-sm text-gray-600">
-        Month: click a day to open day view. Week/day: drag 15-minute blocks to create lessons with exact duration.
+        Upcoming = blue. Past + attended = green. Past + no check-in = red. Past lessons are struck through.
       </p>
 
       {msg && <p className="mt-3 text-sm text-red-600">{msg}</p>}
@@ -170,6 +196,7 @@ export default function TeacherPage() {
           dateClick={onDateClick}
           select={onSelect}
           eventClick={onEventClick}
+          eventDidMount={onEventDidMount}
           slotDuration="00:15:00"
           snapDuration="00:15:00"
           slotLabelInterval="00:30:00"

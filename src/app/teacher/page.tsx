@@ -8,7 +8,7 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { EventClickArg } from "@fullcalendar/core";
+import type { DateClickArg, DateSelectArg, EventClickArg } from "@fullcalendar/core";
 
 type LessonRow = {
   id: string;
@@ -22,6 +22,11 @@ type StudentMapRow = {
   id: string;
   full_name: string;
 };
+
+function addMinutes(isoLike: string, minutes: number) {
+  const d = new Date(isoLike);
+  return new Date(d.getTime() + minutes * 60_000).toISOString();
+}
 
 export default function TeacherPage() {
   const router = useRouter();
@@ -95,10 +100,23 @@ export default function TeacherPage() {
   }, [lessons, studentNames]);
 
   function onEventClick(arg: EventClickArg) {
-    const studentId = String(arg.event.extendedProps.studentId ?? "");
-    const lessonId = arg.event.id;
-    if (!studentId || !lessonId) return;
-    router.push(`/teacher/students/${studentId}?lessonId=${lessonId}`);
+    router.push(`/teacher/lessons/${arg.event.id}`);
+  }
+
+  function onDateClick(arg: DateClickArg) {
+    const start = arg.date.toISOString();
+    const end = addMinutes(start, 60);
+    router.push(
+      `/teacher/lessons/new?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    );
+  }
+
+  function onSelect(arg: DateSelectArg) {
+    const start = arg.start.toISOString();
+    const end = arg.end.toISOString();
+    router.push(
+      `/teacher/lessons/new?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+    );
   }
 
   return (
@@ -122,6 +140,10 @@ export default function TeacherPage() {
         </div>
       </div>
 
+      <p className="mt-2 text-sm text-gray-600">
+        Click a day or drag a time range to create a lesson. Click an existing lesson to open it.
+      </p>
+
       {msg && <p className="mt-3 text-sm text-red-600">{msg}</p>}
 
       <div className="mt-6 border rounded p-3 bg-white">
@@ -134,6 +156,10 @@ export default function TeacherPage() {
             right: "dayGridMonth,timeGridWeek,timeGridDay",
           }}
           events={events}
+          selectable
+          selectMirror
+          dateClick={onDateClick}
+          select={onSelect}
           eventClick={onEventClick}
           dayMaxEvents={3}
           height="auto"

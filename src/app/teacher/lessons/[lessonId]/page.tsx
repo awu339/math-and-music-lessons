@@ -15,11 +15,21 @@ type LessonRow = {
   checked_in_at: string | null;
 };
 
+type LearningResource = {
+  id: string;
+  title: string;
+  kind: "song" | "math_book";
+};
+
 type ChecklistRow = {
   id: string;
   lesson_id: string;
   text: string;
   sort_order: number;
+  resource_id: string | null;
+  segment: string | null;
+  practice_instructions: string | null;
+  resource: LearningResource[] | null;
 };
 
 type CompletionRow = {
@@ -55,6 +65,14 @@ function getLessonStatus(lesson: LessonRow | null) {
   return { isPast, attended, colorClass: "bg-red-500" };
 }
 
+function formatAssignment(item: ChecklistRow) {
+  return {
+    title: (Array.isArray(item.resource) ? item.resource[0]?.title : undefined) || item.text || "Assignment",
+    segment: item.segment?.trim() || "",
+    practice: item.practice_instructions?.trim() || "",
+  };
+}
+
 export default function TeacherLessonDetailPage() {
   const router = useRouter();
   const params = useParams<{ lessonId?: string | string[] }>();
@@ -64,7 +82,12 @@ export default function TeacherLessonDetailPage() {
   const [student, setStudent] = useState<StudentRow | null>(null);
   const [items, setItems] = useState<ChecklistRow[]>([]);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
-  const [assignmentText, setAssignmentText] = useState("");
+
+  const [assignmentType, setAssignmentType] = useState<"song" | "math_book">("song");
+  const [assignmentResourceName, setAssignmentResourceName] = useState("");
+  const [assignmentSegment, setAssignmentSegment] = useState("");
+  const [assignmentPractice, setAssignmentPractice] = useState("");
+
   const [scheduleStartsAt, setScheduleStartsAt] = useState("");
   const [scheduleDuration, setScheduleDuration] = useState(60);
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -106,7 +129,9 @@ export default function TeacherLessonDetailPage() {
 
     const { data: itemRows, error: itemErr } = await supabase
       .from("checklist_items")
-      .select("id, lesson_id, text, sort_order")
+      .select(
+        "id, lesson_id, text, sort_order, resource_id, segment, practice_instructions, resource:learning_resources(id, title, kind)"
+      )
       .eq("lesson_id", lessonId)
       .order("sort_order", { ascending: true });
 
@@ -193,17 +218,40 @@ export default function TeacherLessonDetailPage() {
 
     if (!lessonId) return setMsg("Invalid lesson id.");
 
-    const text = assignmentText.trim();
-    if (!text) return setMsg("Assignment text is required.");
+    const resourceName = assignmentResourceName.trim();
+    const segment = assignmentSegment.trim();
+    const practice = assignmentPractice.trim();
+
+    if (!resourceName) return setMsg("Song/Book name is required.");
+
+    const { data: resourceRow, error: resourceErr } = await supabase
+      .from("learning_resources")
+      .upsert(
+        {
+          kind: assignmentType,
+          title: resourceName,
+        },
+        { onConflict: "kind,title" }
+      )
+      .select("id")
+      .single();
+
+    if (resourceErr) return setMsg(resourceErr.message);
 
     const { error } = await supabase.from("checklist_items").insert({
       lesson_id: lessonId,
-      text,
+      resource_id: resourceRow.id,
+      text: resourceName,
+      segment: segment || null,
+      practice_instructions: practice || null,
       sort_order: items.length,
     });
 
     if (error) return setMsg(error.message);
-    setAssignmentText("");
+
+    setAssignmentResourceName("");
+    setAssignmentSegment("");
+    setAssignmentPractice("");
     await load();
   }
 
@@ -303,14 +351,51 @@ export default function TeacherLessonDetailPage() {
       <section className="mt-6 border rounded p-4">
         <h2 className="font-medium">Assignments</h2>
 
-        <form onSubmit={addAssignment} className="mt-3 flex gap-2">
-          <input
-            className="flex-1 border rounded p-2"
-            value={assignmentText}
-            onChange={(e) => setAssignmentText(e.target.value)}
-            placeholder="Add an assignment"
-          />
-          <button className="rounded bg-black text-white px-4">Add</button>
+        <form onSubmit={addAssignment} className="mt-3 grid gap-2">
+          <label className="text-sm">
+            Resource type
+            <select
+              className="w-full border rounded p-2 mt-1"
+              value={assignmentType}
+              onChange={(e) => setAssignmentType(e.target.value as "song" | "math_book")}
+            >
+              <option value="song">Song</option>
+              <option value="math_book">Math Book</option>
+            </select>
+          </label>
+
+          <label className="text-sm">
+            Song / Book name
+            <input
+              className="w-full border rounded p-2 mt-1"
+              value={assignmentResourceName}
+              onChange={(e) => setAssignmentResourceName(e.target.value)}
+              placeholder="e.g., Fur Elise / Singapore Math 4A"
+            />
+          </label>
+
+          <label className="text-sm">
+            Measure numbers / Page numbers
+            <input
+              className="w-full border rounded p-2 mt-1"
+              value={assignmentSegment}
+              onChange={(e) => setAssignmentSegment(e.target.value)}
+              placeholder="e.g., mm. 12-24 / pp. 31-33"
+            />
+          </label>
+
+          <label className="text-sm">
+            How to practice
+            <textarea
+              className="w-full border rounded p-2 mt-1 text-sm"
+              rows={3}
+              value={assignmentPractice}
+              onChange={(e) => setAssignmentPractice(e.target.value)}
+              placeholder="Practice instructions..."
+            />
+          </label>
+
+          <button className="rounded bg-black text-white px-4 py-2 mt-1">Add</button>
         </form>
 
         <div className="mt-3 text-xs text-gray-600">
@@ -320,11 +405,15 @@ export default function TeacherLessonDetailPage() {
         <div className="mt-4 space-y-2 text-sm">
           {items.map((item) => {
             const done = completedIds.has(item.id);
+            const formatted = formatAssignment(item);
             return (
-              <div key={item.id} className="flex items-center gap-2">
-                <span>*</span>
-                <span className={done ? "line-through text-gray-500" : ""}>{item.text}</span>
-                {done && <span className="text-xs text-gray-500">(Completed)</span>}
+              <div key={item.id} className="border rounded p-2">
+                <div className={`font-medium ${done ? "line-through text-gray-500" : ""}`}>
+                  {formatted.title}
+                </div>
+                {formatted.segment && <div className="text-xs text-gray-600">{formatted.segment}</div>}
+                {formatted.practice && <div className="text-xs text-gray-700 mt-1">{formatted.practice}</div>}
+                {done && <div className="text-xs text-gray-500 mt-1">Completed</div>}
               </div>
             );
           })}

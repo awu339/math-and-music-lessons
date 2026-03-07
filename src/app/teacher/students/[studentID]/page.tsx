@@ -13,17 +13,35 @@ type LessonRow = {
   notes: string;
 };
 
+type LearningResource = {
+  id: string;
+  title: string;
+  kind: "song" | "math_book";
+};
+
 type ChecklistRow = {
   id: string;
   lesson_id: string;
   text: string;
   sort_order: number;
+  resource_id: string | null;
+  segment: string | null;
+  practice_instructions: string | null;
+  resource: LearningResource[] | null;
 };
 
 type CompletionRow = {
   checklist_item_id: string;
   completed: boolean;
 };
+
+function formatAssignment(item: ChecklistRow) {
+  return {
+    title: (Array.isArray(item.resource) ? item.resource[0]?.title : undefined) || item.text || "Assignment",
+    segment: item.segment?.trim() || "",
+    practice: item.practice_instructions?.trim() || "",
+  };
+}
 
 export default function TeacherStudentDetailPage() {
   const router = useRouter();
@@ -51,8 +69,11 @@ export default function TeacherStudentDetailPage() {
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState("");
 
-  const [assignmentText, setAssignmentText] = useState("");
   const [assignmentLessonId, setAssignmentLessonId] = useState<string>("");
+  const [assignmentType, setAssignmentType] = useState<"song" | "math_book">("song");
+  const [assignmentResourceName, setAssignmentResourceName] = useState("");
+  const [assignmentSegment, setAssignmentSegment] = useState("");
+  const [assignmentPractice, setAssignmentPractice] = useState("");
 
   function isValidUuid(value?: string) {
     if (!value) return false;
@@ -107,7 +128,9 @@ export default function TeacherStudentDetailPage() {
 
     const { data: cData, error: cErr } = await supabase
       .from("checklist_items")
-      .select("id, lesson_id, text, sort_order")
+      .select(
+        "id, lesson_id, text, sort_order, resource_id, segment, practice_instructions, resource:learning_resources(id, title, kind)"
+      )
       .order("sort_order", { ascending: true });
 
     if (cErr) return setMsg(cErr.message);
@@ -204,21 +227,43 @@ export default function TeacherStudentDetailPage() {
     e.preventDefault();
     setMsg(null);
 
-    const text = assignmentText.trim();
-    if (!text) return setMsg("Assignment text is required.");
+    const resourceName = assignmentResourceName.trim();
+    const segment = assignmentSegment.trim();
+    const practice = assignmentPractice.trim();
+
+    if (!resourceName) return setMsg("Song/Book name is required.");
     if (!assignmentLessonId) return setMsg("Pick a lesson to attach this to.");
+
+    const { data: resourceRow, error: resourceErr } = await supabase
+      .from("learning_resources")
+      .upsert(
+        {
+          kind: assignmentType,
+          title: resourceName,
+        },
+        { onConflict: "kind,title" }
+      )
+      .select("id")
+      .single();
+
+    if (resourceErr) return setMsg(resourceErr.message);
 
     const nextSortOrder = checklist.filter((c) => c.lesson_id === assignmentLessonId).length;
 
     const { error } = await supabase.from("checklist_items").insert({
       lesson_id: assignmentLessonId,
-      text,
+      resource_id: resourceRow.id,
+      text: resourceName,
+      segment: segment || null,
+      practice_instructions: practice || null,
       sort_order: nextSortOrder,
     });
 
     if (error) return setMsg(error.message);
 
-    setAssignmentText("");
+    setAssignmentResourceName("");
+    setAssignmentSegment("");
+    setAssignmentPractice("");
     await loadAll();
   }
 
@@ -323,7 +368,7 @@ export default function TeacherStudentDetailPage() {
       </section>
 
       <section className="mt-6 border rounded p-4">
-        <h2 className="font-medium">Add checklist item</h2>
+        <h2 className="font-medium">Add assignment</h2>
         <form onSubmit={addAssignment} className="mt-3 grid gap-2">
           <label className="text-sm">
             Attach to lesson
@@ -342,12 +387,45 @@ export default function TeacherStudentDetailPage() {
           </label>
 
           <label className="text-sm">
-            Assignment text
+            Resource type
+            <select
+              className="w-full border rounded p-2 mt-1"
+              value={assignmentType}
+              onChange={(e) => setAssignmentType(e.target.value as "song" | "math_book")}
+            >
+              <option value="song">Song</option>
+              <option value="math_book">Math Book</option>
+            </select>
+          </label>
+
+          <label className="text-sm">
+            Song / Book name
             <input
               className="w-full border rounded p-2 mt-1"
-              value={assignmentText}
-              onChange={(e) => setAssignmentText(e.target.value)}
-              placeholder="e.g., Practice scales 10 min/day"
+              value={assignmentResourceName}
+              onChange={(e) => setAssignmentResourceName(e.target.value)}
+              placeholder="e.g., Fur Elise / Singapore Math 4A"
+            />
+          </label>
+
+          <label className="text-sm">
+            Measure numbers / Page numbers
+            <input
+              className="w-full border rounded p-2 mt-1"
+              value={assignmentSegment}
+              onChange={(e) => setAssignmentSegment(e.target.value)}
+              placeholder="e.g., mm. 12-24 / pp. 31-33"
+            />
+          </label>
+
+          <label className="text-sm">
+            How to practice
+            <textarea
+              className="w-full border rounded p-2 mt-1 text-sm"
+              rows={3}
+              value={assignmentPractice}
+              onChange={(e) => setAssignmentPractice(e.target.value)}
+              placeholder="Practice instructions..."
             />
           </label>
 
@@ -419,16 +497,19 @@ export default function TeacherStudentDetailPage() {
 
                 <div className="mt-3">
                   <div className="text-sm font-medium">Assignments</div>
-                  <div className="mt-2 space-y-1 text-sm">
+                  <div className="mt-2 space-y-2 text-sm">
                     {lessonItems.map((c) => {
                       const isComplete = completedItemIds.has(c.id);
+                      const formatted = formatAssignment(c);
+
                       return (
-                        <div key={c.id} className="flex items-center gap-2">
-                          <span>*</span>
-                          <span className={isComplete ? "line-through text-gray-500" : ""}>
-                            {c.text}
-                          </span>
-                          {isComplete && <span className="text-xs text-gray-500">(Completed)</span>}
+                        <div key={c.id} className="border rounded p-2">
+                          <div className={`font-medium ${isComplete ? "line-through text-gray-500" : ""}`}>
+                            {formatted.title}
+                          </div>
+                          {formatted.segment && <div className="text-xs text-gray-600">{formatted.segment}</div>}
+                          {formatted.practice && <div className="text-xs text-gray-700 mt-1">{formatted.practice}</div>}
+                          {isComplete && <div className="text-xs text-gray-500 mt-1">Completed</div>}
                         </div>
                       );
                     })}

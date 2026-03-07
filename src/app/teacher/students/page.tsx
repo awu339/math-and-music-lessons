@@ -18,10 +18,16 @@ type TeacherStudentRow = {
   created_at: string;
 };
 
+type LessonLookupRow = {
+  student_id: string;
+  starts_at: string;
+};
+
 export default function TeacherStudentsPage() {
   const router = useRouter();
   const [allStudents, setAllStudents] = useState<StudentAccount[]>([]);
   const [myStudents, setMyStudents] = useState<TeacherStudentRow[]>([]);
+  const [nextLessonByStudentId, setNextLessonByStudentId] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
@@ -62,8 +68,35 @@ export default function TeacherStudentsPage() {
       return;
     }
 
+    const myStudentRows = (myRows as TeacherStudentRow[]) ?? [];
     setAllStudents((accountRows as StudentAccount[]) ?? []);
-    setMyStudents((myRows as TeacherStudentRow[]) ?? []);
+    setMyStudents(myStudentRows);
+
+    const myStudentIds = myStudentRows.map((s) => s.id);
+    if (myStudentIds.length === 0) {
+      setNextLessonByStudentId({});
+      return;
+    }
+
+    const { data: lessonRows, error: lessonErr } = await supabase
+      .from("lessons")
+      .select("student_id, starts_at")
+      .in("student_id", myStudentIds)
+      .gte("starts_at", new Date().toISOString())
+      .order("starts_at", { ascending: true });
+
+    if (lessonErr) {
+      setMsg(lessonErr.message);
+      return;
+    }
+
+    const nextMap: Record<string, string> = {};
+    ((lessonRows as LessonLookupRow[]) ?? []).forEach((row) => {
+      if (!nextMap[row.student_id]) {
+        nextMap[row.student_id] = row.starts_at;
+      }
+    });
+    setNextLessonByStudentId(nextMap);
   }
 
   async function addToMyStudents(studentUserId: string) {
@@ -94,8 +127,8 @@ export default function TeacherStudentsPage() {
 
     setBusyUserId(null);
     if (error) {
-      if (error.code === '23505') {
-        return setMsg('That student is already in your students list.');
+      if (error.code === "23505") {
+        return setMsg("That student is already in your students list.");
       }
       return setMsg(error.message);
     }
@@ -130,19 +163,24 @@ export default function TeacherStudentsPage() {
       <section className="mt-6">
         <h2 className="font-medium">Your Students</h2>
         <div className="mt-3 space-y-2">
-          {myStudents.map((s) => (
-            <div key={s.id} className="border rounded p-3 flex justify-between items-center gap-3">
-              <div>
-                <div className="font-medium">{s.full_name}</div>
-                <div className="text-xs text-gray-500">
-                  Added {new Date(s.created_at).toLocaleString()}
+          {myStudents.map((s) => {
+            const nextLesson = nextLessonByStudentId[s.id];
+            return (
+              <div key={s.id} className="border rounded p-3 flex justify-between items-center gap-3">
+                <div>
+                  <div className="font-medium">{s.full_name}</div>
+                  <div className="text-xs text-gray-500">
+                    {nextLesson
+                      ? `Next lesson ${new Date(nextLesson).toLocaleString()}`
+                      : "No upcoming lessons"}
+                  </div>
                 </div>
+                <Link className="underline text-sm" href={`/teacher/students/${s.id}`}>
+                  Manage
+                </Link>
               </div>
-              <Link className="underline text-sm" href={`/teacher/students/${s.id}`}>
-                Manage
-              </Link>
-            </div>
-          ))}
+            );
+          })}
           {myStudents.length === 0 && (
             <div className="text-sm text-gray-500">No students selected yet.</div>
           )}

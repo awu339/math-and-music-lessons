@@ -26,17 +26,35 @@ type LessonRow = {
   notes: string;
 };
 
+type LearningResource = {
+  id: string;
+  title: string;
+  kind: "song" | "math_book";
+};
+
 type ChecklistItem = {
   id: string;
   lesson_id: string;
   text: string;
   sort_order: number;
+  resource_id: string | null;
+  segment: string | null;
+  practice_instructions: string | null;
+  resource: LearningResource[] | null;
 };
 
 type CompletionRow = {
   checklist_item_id: string;
   completed: boolean;
 };
+
+function formatAssignment(item: ChecklistItem) {
+  return {
+    title: (Array.isArray(item.resource) ? item.resource[0]?.title : undefined) || item.text || "Assignment",
+    segment: item.segment?.trim() || "",
+    practice: item.practice_instructions?.trim() || "",
+  };
+}
 
 export default function StudentPage() {
   const router = useRouter();
@@ -146,7 +164,9 @@ export default function StudentPage() {
 
     const { data: itemData, error: itemErr } = await supabase
       .from("checklist_items")
-      .select("id, lesson_id, text, sort_order")
+      .select(
+        "id, lesson_id, text, sort_order, resource_id, segment, practice_instructions, resource:learning_resources(id, title, kind)"
+      )
       .in("lesson_id", lessonIds)
       .order("sort_order", { ascending: true });
 
@@ -290,16 +310,26 @@ export default function StudentPage() {
                 <div className="mt-3">
                   <div className="text-sm font-medium">Checklist</div>
                   <div className="mt-2 space-y-2">
-                    {lessonItems.map((it) => (
-                      <label key={it.id} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={doneMap[it.id] ?? false}
-                          onChange={() => toggle(it.id)}
-                        />
-                        {it.text}
-                      </label>
-                    ))}
+                    {lessonItems.map((it) => {
+                      const formatted = formatAssignment(it);
+                      return (
+                        <label key={it.id} className="flex items-start gap-2 text-sm border rounded p-2">
+                          <input
+                            type="checkbox"
+                            checked={doneMap[it.id] ?? false}
+                            onChange={() => toggle(it.id)}
+                            className="mt-1"
+                          />
+                          <span>
+                            <div className={(doneMap[it.id] ?? false) ? "line-through text-gray-500" : ""}>
+                              {formatted.title}
+                            </div>
+                            {formatted.segment && <div className="text-xs text-gray-600">{formatted.segment}</div>}
+                            {formatted.practice && <div className="text-xs text-gray-700 mt-1">{formatted.practice}</div>}
+                          </span>
+                        </label>
+                      );
+                    })}
                     {lessonItems.length === 0 && (
                       <div className="text-sm text-gray-500">No checklist items for this lesson.</div>
                     )}
